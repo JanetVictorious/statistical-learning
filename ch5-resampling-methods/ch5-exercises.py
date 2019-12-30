@@ -501,7 +501,7 @@ for i in range(boston.shape[0]):
 medv_df2['median_medv'].std()
 # 0.4158999428872771
 
-#### (f) ####
+#### (g) ####
 # Based on this data set, provide an estimate for the tenth percentile of medv in Boston suburbs. Call this quantity μˆ0.1. 
 # (You can use the quantile() function.)
 
