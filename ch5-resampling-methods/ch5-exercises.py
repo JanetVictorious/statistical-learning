@@ -26,10 +26,12 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.metrics import roc_curve, roc_auc_score
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import make_scorer, mean_squared_error
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.utils import resample
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
+from sklearn.base import BaseEstimator, RegressorMixin
 
 # Sampling lib
 # from random import seed
@@ -69,6 +71,10 @@ default.head()
 weekly = pd.read_csv('data/weekly.csv')
 weekly.dtypes
 weekly.head()
+
+boston = pd.read_csv('data/boston.csv')
+boston.dtypes
+boston.head()
 
 
 #%% -----------------------------------------
@@ -337,12 +343,181 @@ plt.ylabel('y')
 # Note you may find it helpful to use the data.frame() function
 # to create a single data set containing both X and Y.
 
+# We want to use cross_val_score from sci-kit learn library.
+# The function is not applicable for statsmodels object.
+# Solution: wrap sklearn base estimators on statsmodels objects and then use the model.
+# Code for wrapping a sklearn baseestimator over statsmodels objects.
+# Qudos: https://sukhbinder.wordpress.com/2018/08/07/cross-validation-score-with-statsmodels/
+
+class statsmodel(BaseEstimator, RegressorMixin):
+    def __init__(self, sm_class, formula):
+        self.sm_class = sm_class
+        self.formula = formula
+        self.model = None
+        self.result = None
+ 
+    def fit(self,data,dummy):
+        self.model = self.sm_class(self.formula,data)
+        self.result = self.model.fit()
+ 
+    def predict(self,X):
+        return self.result.predict(X)
+
+# Dataframe with covariates
+df2 = df1.assign(
+    x2 = lambda x: x['x'].map(lambda x1: x1*x1),
+    x3 = lambda x: x['x'].map(lambda x1: x1*x1*x1),
+    x4 = lambda x: x['x'].map(lambda x1: x1*x1*x1*x1)
+)
+
+# Mean squared error
+mse = make_scorer(mean_squared_error)
+
 # i.
-res1_glm = smf.ols(formula='y ~ x', data=df1)
+model1 = statsmodel(smf.glm, 'y ~ x')
+res1_glm = smf.glm(formula='y ~ x', data=df2).fit()
+print(res1_glm.summary())
+res1_glm.params
+cv_results1 = cross_val_score(model1, df2, df2['y'], scoring=mse, cv=df2.shape[0])
+print('LOOCV error: %f' % cv_results1.mean())
+
+# ii.
+model2 = statsmodel(smf.glm, 'y ~ x + x2')
+res2_glm = smf.glm(formula='y ~ x + x2', data=df2).fit()
+print(res2_glm.summary())
+cv_results2 = cross_val_score(model2, df2, df2['y'], scoring=mse, cv=df2.shape[0])
+print('LOOCV error: %f' % cv_results2.mean())
+
+# iii.
+model3 = statsmodel(smf.glm, 'y ~ x + x2 + x3')
+res3_glm = smf.glm(formula='y ~ x + x2 + x3', data=df2).fit()
+print(res3_glm.summary())
+cv_results3 = cross_val_score(model3, df2, df2['y'], scoring=mse, cv=df2.shape[0])
+print('LOOCV error: %f' % cv_results3.mean())
+
+# iv.
+model4 = statsmodel(smf.glm, 'y ~ x + x2 + x3 + x4')
+res4_glm = smf.glm(formula='y ~ x + x2 + x3 + x4', data=df2).fit()
+print(res4_glm.summary())
+cv_results4 = cross_val_score(model4, df2, df2['y'], scoring=mse, cv=df2.shape[0])
+print('LOOCV error: %f' % cv_results4.mean())
+
+# Plot regressions
+df3 = df2
+df3['y1'] = res1_glm.predict()
+df3['y2'] = res2_glm.predict()
+df3['y3'] = res3_glm.predict()
+df3['y4'] = res4_glm.predict()
+
+sns.scatterplot(x='x', y='y', data=df3)
+sns.lineplot(x='x', y='y1', data=df3, ci=None)
+sns.lineplot(x='x', y='y2', data=df3, ci=None)
+sns.lineplot(x='x', y='y3', data=df3, ci=None)
+sns.lineplot(x='x', y='y4', data=df3, ci=None)
+plt.legend(['y ~ x', 'y ~ x+x2', 'y ~ x+x2+x3', 'y ~ x+x2+x3+x4', 'obs'])
+plt.xlabel('x')
+plt.ylabel('y')
+
+#### (e) ####
+# Which of the models in (c) had the smallest LOOCV error? Is this what you expected? Explain your answer.
+
+# The quadratic fit had the lowest error. This was expected since the sample was generated on a quadratic form (true form of y).
+
+#### (f) ####
+# Comment on the statistical significance of the coefficient estimates that results from fitting each of the models in 
+# (c) using least squares. Do these results agree with the conclusions drawn based on the cross-validation results?
+
+# p-values show significance on linear and quadratic terms, which is in accordance with the CV results
 
 
+# ------------------------
+#### Question 9 ####
+# ------------------------
+# We will now consider the Boston housing data set, from the MASS library.
 
+#### (a) ####
+# Based on this data set, provide an estimate for the population mean of medv. Call this estimate μˆ.
 
+sns.distplot(boston['medv'])
+mu_hat = boston['medv'].mean()
 
+#### (b) ####
+# Provide an estimate of the standard error of μˆ. Interpret this result.
+# Hint: We can compute the standard error of the sample mean by dividing the sample standard deviation by the square root 
+# of the number of observations.
 
+(((boston['medv'] - mu_hat)**2).sum()/(boston.shape[0]-1))**0.5
+boston['medv'].std()/(boston.shape[0]**0.5)
+# 0.40886114749753505
 
+#### (c) ####
+# Now estimate the standard error of μˆ using the bootstrap. How does this compare to your answer from (b)?
+
+# Dataframe for storing mean 
+medv_df = pd.DataFrame(0, index=np.arange(boston.shape[0]), columns=['mean_medv'])
+
+for i in range(boston.shape[0]):
+    # Bootstrap dataset
+    boot = resample(boston, replace=True, n_samples=None, random_state=randint(0,boston.shape[0]))
+    # Mean of boot sample
+    medv_df.iloc[i, 0] = boot['medv'].mean()
+
+medv_df['mean_medv'].std()
+# 0.4310396316818401
+
+# From (b) se=0.4089, from (c) se=0.4310 so quite close using the bootstrap. Both bootstrap version gives a slightly higher 
+# standard error.
+
+#### (d) ####
+# Based on your bootstrap estimate from (c), provide a 95 % confidence interval for the mean of medv. Compare it to the 
+# results obtained using t.test(Boston$medv).
+# Hint: You can approximate a 95 % confidence interval using the formula [μˆ − 2SE(μˆ), μˆ + 2SE(μˆ)].
+
+[mu_hat - 1.96*medv_df['mean_medv'].std(), mu_hat + 1.96*medv_df['mean_medv'].std()]
+# [21.6880, 23.3776]
+
+#### (e) ####
+# Based on this data set, provide an estimate, μˆmed, for the median value of medv in the population.
+mu_hat_med = boston['medv'].median()
+
+sns.distplot(boston['medv'])
+plt.axvline(x=mu_hat, color='r')
+plt.axvline(x=mu_hat_med, color='b')
+plt.legend(['mean', 'median'])
+
+#### (f) ####
+# We now would like to estimate the standard error of μˆmed. Unfortunately, there is no simple formula for computing the 
+# standard error of the median. Instead, estimate the standard error of the median using the bootstrap. Comment on your findings.
+
+# Dataframe for storing median
+medv_df2 = pd.DataFrame(0, index=np.arange(boston.shape[0]), columns=['median_medv'])
+
+for i in range(boston.shape[0]):
+    # Bootstrap dataset
+    boot = resample(boston, replace=True, n_samples=None, random_state=randint(0,boston.shape[0]))
+    # Mean of boot sample
+    medv_df2.iloc[i, 0] = boot['medv'].median()
+
+medv_df2['median_medv'].std()
+# 0.4158999428872771
+
+#### (f) ####
+# Based on this data set, provide an estimate for the tenth percentile of medv in Boston suburbs. Call this quantity μˆ0.1. 
+# (You can use the quantile() function.)
+
+mu_hat_01 = np.quantile(boston['medv'], 0.1)
+
+#### (h) ####
+# Use the bootstrap to estimate the standard error of μˆ0.1. Comment on your findings.
+
+# Dataframe for storing quantile
+medv_df3 = pd.DataFrame(0, index=np.arange(boston.shape[0]), columns=['quantile10'])
+
+for i in range(boston.shape[0]):
+    # Bootstrap dataset
+    boot = resample(boston, replace=True, n_samples=None, random_state=randint(0,boston.shape[0]))
+    # Mean of boot sample
+    medv_df3.iloc[i, 0] = np.quantile(boot['medv'], 0.1)
+
+medv_df3['quantile10'].std()
+# 0.5110468417827717
