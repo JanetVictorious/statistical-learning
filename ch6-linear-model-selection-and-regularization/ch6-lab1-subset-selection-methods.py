@@ -16,10 +16,6 @@ import os
 
 # Regression libs
 from sklearn.linear_model import LinearRegression
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.metrics import roc_curve, roc_auc_score
 from sklearn.metrics import make_scorer, mean_squared_error
@@ -31,16 +27,6 @@ from sklearn.base import BaseEstimator, RegressorMixin
 
 import itertools
 import time
-
-# Sampling lib
-# from random import seed
-# from random import random
-# from random import gauss
-from numpy.random import seed
-from numpy.random import rand
-from numpy.random import randn
-from numpy.random import randint
-
 
 
 #%% -----------------------------------------
@@ -67,72 +53,77 @@ hitters = pd.read_csv('data/hitters.csv')
 hitters.dtypes
 hitters.head()
 
-# A data frame with 322 observations of major league players on the following 20 variables.
+"""
+A data frame with 322 observations of major league players on the following 20 variables.
 
-# AtBat
-# Number of times at bat in 1986
+AtBat
+Number of times at bat in 1986
 
-# Hits
-# Number of hits in 1986
+Hits
+Number of hits in 1986
 
-# HmRun
-# Number of home runs in 1986
+HmRun
+Number of home runs in 1986
 
-# Runs
-# Number of runs in 1986
+Runs
+Number of runs in 1986
 
-# RBI
-# Number of runs batted in in 1986
+RBI
+Number of runs batted in in 1986
 
-# Walks
-# Number of walks in 1986
+Walks
+Number of walks in 1986
 
-# Years
-# Number of years in the major leagues
+Years
+Number of years in the major leagues
 
-# CAtBat
-# Number of times at bat during his career
+CAtBat
+Number of times at bat during his career
 
-# CHits
-# Number of hits during his career
+CHits
+Number of hits during his career
 
-# CHmRun
-# Number of home runs during his career
+CHmRun
+Number of home runs during his career
 
-# CRuns
-# Number of runs during his career
+CRuns
+Number of runs during his career
 
-# CRBI
-# Number of runs batted in during his career
+CRBI
+Number of runs batted in during his career
 
-# CWalks
-# Number of walks during his career
+CWalks
+Number of walks during his career
 
-# League
-# A factor with levels A and N indicating player's league at the end of 1986
+League
+A factor with levels A and N indicating player's league at the end of 1986
 
-# Division
-# A factor with levels E and W indicating player's division at the end of 1986
+Division
+A factor with levels E and W indicating player's division at the end of 1986
 
-# PutOuts
-# Number of put outs in 1986
+PutOuts
+Number of put outs in 1986
 
-# Assists
-# Number of assists in 1986
+Assists
+Number of assists in 1986
 
-# Errors
-# Number of errors in 1986
+Errors
+Number of errors in 1986
 
-# Salary
-# 1987 annual salary on opening day in thousands of dollars
+Salary
+1987 annual salary on opening day in thousands of dollars
 
-# NewLeague
-# A factor with levels A and N indicating player's league at the beginning of 1987
+NewLeague
+A factor with levels A and N indicating player's league at the beginning of 1987
+"""
 
 
 #%% -----------------------------------------
 # Functions
 # -------------------------------------------
+
+# Mean squared error
+mse = make_scorer(mean_squared_error)
 
 def processSubset(feature_set):
     # Fit model on feature_set and calculate RSS
@@ -155,6 +146,18 @@ def processSubsetGLM(feature_set):
     RSS = regr.deviance
     return {'model':regr, 'RSS':RSS, 'variables':features}
 
+def processSubsetCrossValidation(feature_set):
+    # Fit model on feature_set and calculate RSS
+    features = list(feature_set)
+    # X - predictors
+    # y - Salary (continuous)
+    model = sm.OLS(y, X[list(feature_set)])
+    regr = model.fit()
+    # 5 fold cross validation
+    cv_results1 = cross_val_score(LinearRegression(), X[list(feature_set)], y, scoring=mse, cv=10)
+    MSE = cv_results1.mean()
+    return {'model':regr, 'MSE':MSE, 'variables':features}
+
 # Best subset selection function
 def getBest(k, model):
     tic = time.time()
@@ -165,6 +168,20 @@ def getBest(k, model):
     models = pd.DataFrame(results)
     # Choose the model with the highest RSS
     best_model = models.loc[models['RSS'].argmin()]
+    toc = time.time()
+    print("Processed", models.shape[0], "models on", k, "predictors in", (toc-tic), "seconds.")
+    # Return the best model, along with some other useful information about the model
+    return best_model
+
+def getBestCrossValidation(k):
+    tic = time.time()
+    results = []
+    for combo in itertools.combinations(X.columns, k):
+        results.append(processSubsetCrossValidation(combo))
+    # Wrap everything up in a nice dataframe
+    models = pd.DataFrame(results)
+    # Choose the model with the highest RSS
+    best_model = models.loc[models['MSE'].argmin()]
     toc = time.time()
     print("Processed", models.shape[0], "models on", k, "predictors in", (toc-tic), "seconds.")
     # Return the best model, along with some other useful information about the model
@@ -187,6 +204,22 @@ def forward(predictors, model):
     # Return the best model, along with some other useful information about the model
     return best_model
 
+def forwardCrossValidation(predictors):
+    # Pull out predictors we still need to process
+    remaining_predictors = [p for p in X.columns if p not in predictors]
+    tic = time.time()
+    results = []
+    for p in remaining_predictors:
+        results.append(processSubsetCrossValidation(predictors+[p]))
+    # Wrap everything up in a nice dataframe
+    models = pd.DataFrame(results)
+    # Choose the model with the highest RSS
+    best_model = models.loc[models['MSE'].argmin()]
+    toc = time.time()
+    print("Processed ", models.shape[0], "models on", len(predictors)+1, "predictors in", (toc-tic), "seconds.")
+    # Return the best model, along with some other useful information about the model
+    return best_model
+
 # Backward stepwise selection function
 def backward(predictors, model):
     tic = time.time()
@@ -202,6 +235,19 @@ def backward(predictors, model):
     # Return the best model, along with some other useful information about the model
     return best_model
 
+def backwardCrossValidation(predictors):
+    tic = time.time()
+    results = []
+    for combo in itertools.combinations(predictors, len(predictors)-1):
+        results.append(processSubsetCrossValidation(combo))
+    # Wrap everything up in a nice dataframe
+    models = pd.DataFrame(results)
+    # Choose the model with the highest RSS
+    best_model = models.loc[models['MSE'].argmin()]
+    toc = time.time()
+    print("Processed ", models.shape[0], "models on", len(predictors)-1, "predictors in", (toc-tic), "seconds.")
+    # Return the best model, along with some other useful information about the model
+    return best_model
 
 #%% -----------------------------------------
 # Data prepping
@@ -251,13 +297,15 @@ sns.pairplot(data=X2[['Hits', 'CRBI', 'Division_W', 'PutOuts', 'AtBat', 'Walks',
 #%% -----------------------------------------
 # Best Subset Selection
 # -------------------------------------------
-# Here we apply the best subset selection approach to the Hitters data. We wish to predict
-# a baseball player’s Salary on the basis of various statistics associated with 
-# performance in the previous year.
+"""
+Here we apply the best subset selection approach to the Hitters data. We wish to predict
+a baseball player’s Salary on the basis of various statistics associated with 
+performance in the previous year.
 
-# Two approaches are implemented:
-# (i) OLS to predict Salary
-# (ii) Logistic regression to predict wether or not a player will have a salary above the median salary
+Two approaches are implemented:
+(i) OLS to predict Salary
+(ii) Logistic regression to predict wether or not a player will have a salary above the median salary
+"""
 
 # ------------------------
 # (i) Subset selection OLS
@@ -378,11 +426,11 @@ plt.ylabel('True Positive Rate')
 #%% -----------------------------------------
 # Forward and Backward Stepwise Selection
 # -------------------------------------------
-
-# Two approaches are implemented:
-# (i) OLS to predict Salary
-# (ii) Logistic regression to predict wether or not a player will have a salary above the median salary
-
+"""
+Two approaches are implemented:
+(i) OLS to predict Salary
+(ii) Logistic regression to predict wether or not a player will have a salary above the median salary
+"""
 # ------------------------
 # (i) Forward selection OLS
 # ------------------------
@@ -609,52 +657,121 @@ plt.xlabel('False Positive Rate')
 plt.ylabel('True Positive Rate')
 
 
+#%% -----------------------------------------
+# Best Subset Selection with cross validation
+# -------------------------------------------
+
 # ------------------------
+# (i) Subset selection OLS
+# ------------------------
+
+# Best subset selection OLS
+models_best_cv = pd.DataFrame(columns=['MSE', 'model', 'variables'])
+
+tic = time.time()
+for i in range(1, 6):
+    models_best_cv.loc[i] = getBestCrossValidation(i)
+
+toc = time.time()
+print('Total elapsed time:', (toc-tic)/60, 'minutes.')
+
+# Plot results
+sns.lineplot(x=models_best_cv.index, y='MSE', data=models_best_cv)
+plt.xlabel('# predictors')
+plt.ylabel('MSE')
+
+
+# ------------------------
+# (i) Forward selection OLS
+# ------------------------
+
+models_fwd_cv = pd.DataFrame(columns=['MSE', 'model', 'variables'])
+
+tic = time.time()
+predictors = []
+
+for i in range(1,len(X.columns)+1):    
+    models_fwd_cv.loc[i] = forwardCrossValidation(predictors)
+    predictors = models_fwd_cv.loc[i]["model"].model.exog_names
+
+toc = time.time()
+print('Total elapsed time:', (toc-tic)/60, 'minutes.')
+
+# Plot results
+sns.lineplot(x=models_fwd_cv.index, y='MSE', data=models_fwd_cv)
+plt.xlabel('# predictors')
+plt.ylabel('MSE')
+
+# ------------------------
+# (i) Backward selection OLS
+# ------------------------
+
+models_bwd_cv = pd.DataFrame(columns=['MSE', 'model', 'variables'], index = range(1,len(X.columns)))
+
+tic = time.time()
+predictors = X.columns
+
+while(len(predictors) > 1):  
+    models_bwd_cv.loc[len(predictors)-1] = backwardCrossValidation(predictors)
+    predictors = models_bwd_cv.loc[len(predictors)-1]['model'].model.exog_names
+
+toc = time.time()
+print('Total elapsed time:', (toc-tic)/60, 'minutes.')
+
+models_bwd_cv['MSE'] = models_bwd_cv['MSE'].astype(float)
+
+# Plot results
+sns.lineplot(x=models_bwd_cv.index, y='MSE', data=models_bwd_cv)
+plt.xlabel('# predictors')
+plt.ylabel('MSE')
+
+#%% -----------------------------------------
 # Results
-# ------------------------
+# -------------------------------------------
 
-# OLS model is chosen based on the lowest BIC
-
-print("-------------------------------------")
-print("Subset selection OLS:")
-print("-------------------------------------")
-print("-------------------------------------")
-print("Best subset OLS:")
-print("-------------------------------------")
+print('-------------------------------------')
+print('Subset selection OLS:')
+print('-------------------------------------')
+print('-------------------------------------')
+print('Best subset OLS:')
+print('-------------------------------------')
+print('#### BIC ####')
 print(models_best[models_best['bic'] == models_best['bic'].min()].iloc[0, 1].params)
+print('#### CV ####')
+print(models_best_cv[models_best_cv['MSE'] == models_best_cv['MSE'].min()].iloc[0, 1].params)
 
-print("-------------------------------------")
-print("Forward selection OLS:")
-print("-------------------------------------")
+print('-------------------------------------')
+print('Forward selection OLS:')
+print('-------------------------------------')
+print('#### BIC ####')
 print(models_fwd[models_fwd['bic'] == models_fwd['bic'].min()].iloc[0, 1].params)
+print('#### CV ####')
+print(models_fwd_cv[models_fwd_cv['MSE'] == models_fwd_cv['MSE'].min()].iloc[0, 1].params)
 
-print("-------------------------------------")
-print("Backward selection OLS:")
-print("-------------------------------------")
+print('-------------------------------------')
+print('Backward selection OLS:')
+print('-------------------------------------')
+print('#### BIC ####')
 print(models_bwd[models_bwd['bic'] == models_bwd['bic'].min()].iloc[0, 1].params)
+print('#### CV ####')
+print(models_bwd_cv[models_bwd_cv['MSE'] == models_bwd_cv['MSE'].min()].iloc[0, 1].params)
 
 # Logistic regression model is based on highest AUC
 
-print("-------------------------------------")
-print("Subset selection logistic regression:")
-print("-------------------------------------")
-print("-------------------------------------")
-print("Best subset logistic regression:")
-print("-------------------------------------")
+print('-------------------------------------')
+print('Subset selection logistic regression:')
+print('-------------------------------------')
+print('-------------------------------------')
+print('Best subset logistic regression:')
+print('-------------------------------------')
 print(models_best_glm[models_best_glm['auc'] == models_best_glm['auc'].max()].iloc[0, 1].params)
 
-print("-------------------------------------")
-print("Forward selection logistic regression:")
-print("-------------------------------------")
+print('-------------------------------------')
+print('Forward selection logistic regression:')
+print('-------------------------------------')
 print(models_fwd_glm[models_fwd_glm['auc'] == models_fwd_glm['auc'].max()].iloc[0, 1].params)
 
-print("-------------------------------------")
-print("Backward selection logistic regression:")
-print("-------------------------------------")
+print('-------------------------------------')
+print('Backward selection logistic regression:')
+print('-------------------------------------')
 print(models_bwd_glm[models_bwd_glm['auc'] == models_bwd_glm['auc'].max()].iloc[0, 1].params)
-
-
-
-
-
-
